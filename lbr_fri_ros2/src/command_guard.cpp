@@ -12,6 +12,9 @@ bool CommandGuard::is_valid_command(const_idl_command_t_ref lbr_command,
   if (!command_in_velocity_limits_(lbr_state)) {
     return false;
   }
+  if (!command_in_torque_limits_(lbr_command, lbr_state)) {
+    return false;
+  }
   return true;
 }
 

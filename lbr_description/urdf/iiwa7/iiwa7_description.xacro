@@ -10,8 +10,8 @@
         <xacro:include filename="$(find lbr_description)/ros2_control/lbr_system_interface.xacro" />
 
         <!-- joint limits via yaml -->
-        <xacro:property name="joint_limits_path"
-            value="$(find lbr_description)/urdf/iiwa7/joint_limits.yaml" />
+        <xacro:arg name="joint_limits_path" default="$(find lbr_description)/urdf/iiwa7/joint_limits.yaml" />
+        <xacro:property name="joint_limits_path" value="$(arg joint_limits_path)" />
         <xacro:property name="joint_limits" value="${xacro.load_yaml(joint_limits_path)}" />
 
         <!-- constants -->
