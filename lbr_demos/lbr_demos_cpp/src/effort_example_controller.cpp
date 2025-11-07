@@ -59,7 +59,6 @@ private:
   // state variables
   vector q_{};
   vector effort_{};
-  vector ext_effort_{};
   vector initial_q_{};
 
   vector diff_q_{};
@@ -108,8 +107,6 @@ EffortExampleController::state_interface_configuration() const {
                            + hardware_interface::HW_IF_VELOCITY);
     config.names.push_back(robot_name_ + "_A" + std::to_string(i) + "/"
                            + hardware_interface::HW_IF_EFFORT);
-    config.names.push_back(
-      robot_name_ + "_A" + std::to_string(i) + "/external_torque");
   }
   return config;
 }
@@ -118,7 +115,7 @@ controller_interface::return_type EffortExampleController::update(
   const rclcpp::Time & /*time*/,
   const rclcpp::Duration &period) {
   updateJointStates();
-  double dt = period.seconds();
+  const double dt = period.seconds();
   elapsed_time_ = elapsed_time_ + dt;
 
   vector efforts;
@@ -142,7 +139,7 @@ controller_interface::return_type EffortExampleController::update(
     }
 
     // speed goal
-    double dgoal = (goals[i] - goals_[i]) / dt;
+    const double dgoal = (goals[i] - goals_[i]) / dt;
 
     // computed effort, limited to bounds
     double effort = p_gains_[i] * (goals[i] - q_[i]) +
@@ -167,7 +164,6 @@ controller_interface::return_type EffortExampleController::update(
       message.measured_torque = effort_;
       message.commanded_joint_position = goals;
       message.measured_joint_position = q_;
-      message.external_torque = ext_effort_;
       state_publisher_->publish(message);
     }
 
@@ -259,15 +255,13 @@ CallbackReturn EffortExampleController::on_activate(
 
 void EffortExampleController::updateJointStates() {
   for (auto i = 0; i < lbr_fri_ros2::N_JNTS; ++i) {
-    const auto &position_interface = state_interfaces_[4 * i];
-    const auto &velocity_interface = state_interfaces_[4 * i + 1];
-    const auto &effort_interface = state_interfaces_[4 * i + 2];
-    const auto &ext_effort_interface = state_interfaces_[4 * i + 3];
+    const auto &position_interface = state_interfaces_[3 * i];
+    const auto &velocity_interface = state_interfaces_[3 * i + 1];
+    const auto &effort_interface = state_interfaces_[3 * i + 2];
 
     q_[i] = position_interface.get_value();
     dq_[i] = velocity_interface.get_value();
     effort_[i] = effort_interface.get_value();
-    ext_effort_[i] = ext_effort_interface.get_value();
   }
 }
 

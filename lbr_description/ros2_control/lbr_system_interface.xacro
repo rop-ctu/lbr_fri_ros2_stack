@@ -94,22 +94,36 @@
                 </gpio>
             </xacro:if>
 
+            <xacro:property name="gazebo_effort" value="False"/>
+            <xacro:if value="${mode == 'gazebo'}">
+                <!-- for gazebo, determine a command interface based on
+                    client_command_mode -->
+                <xacro:unless value="${system_config['hardware']['client_command_mode'] in ('position', 'torque_only')}">
+                    ${xacro.error("Gazebo cannot handle client_command_mode:", system_config['hardware']['client_command_mode'])}
+                </xacro:unless>
+                <xacro:if value="${system_config['hardware']['client_command_mode'] == 'torque_only'}">
+                    <xacro:property name="gazebo_effort" value="True"/>
+                </xacro:if>
+            </xacro:if>
+
             <!-- define joints and command/state interfaces for each joint -->
             <xacro:macro name="joint_interface"
                 params="name min_position max_position max_velocity max_torque mode initial_position">
                 <joint name="${name}">
-                    <command_interface name="position">
-                        <param name="min">${min_position}</param>
-                        <param name="max">${max_position}</param>
-                    </command_interface>
-                    <!-- only single command interface, refer
+                    <!-- only single command interface for gazebo, refer
                     https://github.com/ros-controls/gz_ros2_control/issues/182 -->
-                    <xacro:unless value="${mode == 'gazebo'}">
+                    <xacro:if value="${mode != 'gazebo' or not gazebo_effort}">
+                        <command_interface name="position">
+                            <param name="min">${min_position}</param>
+                            <param name="max">${max_position}</param>
+                        </command_interface>
+                    </xacro:if>
+                    <xacro:if value="${mode != 'gazebo' or gazebo_effort}">
                         <command_interface name="effort">
                             <param name="min">-${max_torque}</param>
                             <param name="max"> ${max_torque}</param>
                         </command_interface>
-                    </xacro:unless>
+                    </xacro:if>
                     <state_interface name="position"> 
                       <param name="initial_value">${initial_position}</param>
                     </state_interface>
