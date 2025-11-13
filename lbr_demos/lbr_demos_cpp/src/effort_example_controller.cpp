@@ -176,7 +176,7 @@ controller_interface::return_type EffortExampleController::update(
 
 CallbackReturn EffortExampleController::on_init() {
   try {
-    auto_declare<std::string>("robot_name", "lbr");
+    auto_declare<std::string>("robot_name", "");
     auto_declare<double>("dq_filt_alpha", 0.8);
     auto_declare<double>("report_period", 0.1);
     auto_declare<double>("init_time", 10.0);
@@ -209,6 +209,37 @@ CallbackReturn EffortExampleController::on_configure(
 
   // read parameters
   robot_name_ = get_node()->get_parameter("robot_name").as_string();
+
+  if (robot_name_.empty()) {
+    // try to extract the robot name from this controller's ROS 2 namespace.
+
+    std::string ns = get_node()->get_namespace();
+
+    RCLCPP_INFO(get_node()->get_logger(), "Namespace: '%s'", ns.c_str());
+
+    if (ns.empty() || ns == "/") {
+      // use a default
+      robot_name_ = "lbr";
+      RCLCPP_INFO(get_node()->get_logger(),
+        "Using default robot name: '%s'", robot_name_.c_str());
+    } else {
+      // strip leading '/'
+      if (ns.front() == '/') ns.erase(0, 1);
+      // take first segment before next '/'
+      auto pos = ns.find('/');
+      if (pos != std::string::npos) {
+        robot_name_ = ns.substr(0, pos);
+      } else {
+        robot_name_ = ns;
+      }
+      RCLCPP_INFO(get_node()->get_logger(),
+        "Using robot name from the namespace: '%s'", robot_name_.c_str());
+    }
+  } else {
+    RCLCPP_INFO(get_node()->get_logger(),
+      "Using robot name from param: '%s'", robot_name_.c_str());
+  }
+
   dq_filt_alpha_ = get_node()->get_parameter("dq_filt_alpha").as_double();
   report_period_ = get_node()->get_parameter("report_period").as_double();
   start_time_ = get_node()->get_parameter("init_time").as_double();
