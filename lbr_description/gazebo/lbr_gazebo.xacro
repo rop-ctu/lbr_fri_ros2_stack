@@ -1,12 +1,13 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
     <xacro:macro name="lbr_gazebo" params="robot_name:=^|lbr">
-
+        <xacro:arg name="controller_params_path" default="$(find lbr_description)/ros2_control/lbr_controllers.yaml" />
+        <xacro:property name="controller_params_path" value="$(arg controller_params_path)" />
         <!-- ros_control-plugin -->
         <gazebo>
             <plugin name="gz_ros2_control::GazeboSimROS2ControlPlugin"
                 filename="gz_ros2_control-system">
-                <parameters>$(find lbr_description)/ros2_control/lbr_controllers.yaml</parameters>
+                <parameters>$(arg controller_params_path)</parameters>
                 <ros>
                     <namespace>/${robot_name}</namespace>
                 </ros>
