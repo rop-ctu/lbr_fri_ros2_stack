@@ -78,13 +78,17 @@ void TorqueOnlyCommandInterface::buffered_command_to_fri(fri_command_t_ref comma
       throw std::runtime_error(err);
     }
 
+    for (int i = 0; i < KUKA::FRI::LBRState::NUMBER_OF_JOINTS; i ++) {
+      init_pos[i] = init_pos[i] * 0.99 + 0.01 * state.measured_joint_position[i];
+    }
+
     // write command_target_ to command_ else use internal command_
     command_.torque = command_target_.torque;
   }
 
   // the current (unchanged) joint position (robot interface needs to send positions for safety
   // measures even when they are not used internally for control)
-  command_.joint_position = state.measured_joint_position;
+  command_.joint_position = init_pos;
 
   // validate
   if (!command_guard_->is_valid_command(command_, state)) {
