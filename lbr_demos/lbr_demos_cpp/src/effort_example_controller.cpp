@@ -1,4 +1,5 @@
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "lbr_ros2_control/system_interface_type_values.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -45,6 +46,7 @@ public:
 
 private:
   // parameters
+  double period_{0.0};
   std::string robot_name_;
   vector p_gains_{};
   vector d_gains_{};
@@ -60,6 +62,8 @@ private:
   vector q_{};
   vector effort_{};
   vector initial_q_{};
+  vector external_q_{};
+  vector commanded_q_{};
 
   vector diff_q_{};
   vector dq_{};
@@ -68,6 +72,7 @@ private:
 
   double elapsed_time_{0.0};
   double last_time_{0.0};
+  bool all_hw_interfaces{false};
 
   void updateJointStates();
 
@@ -107,17 +112,37 @@ EffortExampleController::state_interface_configuration() const {
                            + hardware_interface::HW_IF_VELOCITY);
     config.names.push_back(robot_name_ + "_A" + std::to_string(i) + "/"
                            + hardware_interface::HW_IF_EFFORT);
+    if (all_hw_interfaces) {
+      config.names.push_back(robot_name_ + "_A" + std::to_string(i) + "/"
+                             + lbr_ros2_control::HW_IF_EXTERNAL_TORQUE);
+      config.names.push_back(robot_name_ + "_A" + std::to_string(i) + "/"
+                             + lbr_ros2_control::HW_IF_COMMANDED_TORQUE);
+    }
   }
   return config;
 }
 
 controller_interface::return_type EffortExampleController::update(
-  const rclcpp::Time & /*time*/,
-  const rclcpp::Duration &period) {
+  const rclcpp::Time &, // time,
+  const rclcpp::Duration & // period
+) {
   updateJointStates();
-  const double dt = period.seconds();
+  const double dt = period_;
+  // gazebo: when gazebo update rate is the same as controller_manager update
+  // rate, sometimes we got period=0 and sometimes twice the value
+
+  // the first run - send some nonzero effort to wake-up hw interface in case
+  // the gains are zero
+  if (elapsed_time_ == 0.0) {
+    elapsed_time_ = elapsed_time_ + dt;
+    for (int i = 0; i < lbr_fri_ros2::N_JNTS; ++i)
+      command_interfaces_[i].set_value(0.01);
+    return controller_interface::return_type::OK;
+  }
+
   elapsed_time_ = elapsed_time_ + dt;
 
+  //printf("%f %f \n", period.seconds(), time.seconds());
   vector efforts;
   vector goals;
 
@@ -160,10 +185,11 @@ controller_interface::return_type EffortExampleController::update(
     if (elapsed_time_ - last_time_ > report_period_) {
       last_time_ = elapsed_time_;
       auto message = lbr_fri_idl::msg::LBRState();
-      message.commanded_torque = efforts;
+      message.commanded_torque = commanded_q_;
       message.measured_torque = effort_;
       message.commanded_joint_position = goals;
       message.measured_joint_position = q_;
+      message.external_torque = external_q_;
       state_publisher_->publish(message);
     }
 
@@ -180,6 +206,7 @@ CallbackReturn EffortExampleController::on_init() {
     auto_declare<double>("dq_filt_alpha", 0.8);
     auto_declare<double>("report_period", 0.1);
     auto_declare<double>("init_time", 10.0);
+    auto_declare<bool>("all_hw_interfaces", false);
 
     auto_declare<std::vector<double> >("p_gains", {});
     auto_declare<std::vector<double> >("d_gains", {});
@@ -189,6 +216,25 @@ CallbackReturn EffortExampleController::on_init() {
     auto_declare<std::vector<double> >("init_pos", {});
   } catch (const std::exception &e) {
     fprintf(stderr, "on_init: failed: %s \n", e.what());
+    return CallbackReturn::ERROR;
+  }
+
+  // extract period from the update_rate parameter of controller_manager
+  auto cm_client = std::make_shared<rclcpp::SyncParametersClient>(get_node(),
+    "controller_manager"); // assumed the same namespace as this node
+
+  while (!cm_client->wait_for_service(std::chrono::seconds(1)))
+    RCLCPP_INFO(get_node()->get_logger(),
+              "controller_manager parameter service not available, waiting");
+
+  auto params = cm_client->get_parameters({"update_rate"});
+  if (!params.empty() && params[0].get_type() !=
+      rclcpp::ParameterType::PARAMETER_NOT_SET) {
+    auto update_rate = params[0].as_int();
+    RCLCPP_INFO(get_node()->get_logger(), "update_rate: %ld", update_rate);
+    period_ = 1.0 / static_cast<double>(update_rate);
+  } else {
+    RCLCPP_FATAL(get_node()->get_logger(), "cannot read update_rate");
     return CallbackReturn::ERROR;
   }
 
@@ -202,6 +248,8 @@ CallbackReturn EffortExampleController::on_configure(
   set_vector(p_gains_, 200.0);
   set_vector(d_gains_, 0.0);
   set_vector(q_amplitudes_, 0.0);
+  set_vector(external_q_, 0.0);
+  set_vector(commanded_q_, 0.0);
   q_amplitudes_[2] = 0.1;
   q_amplitudes_[3] = 0.1;
   set_vector(q_periods_, 5.0);
@@ -221,7 +269,7 @@ CallbackReturn EffortExampleController::on_configure(
       // use a default
       robot_name_ = "lbr";
       RCLCPP_INFO(get_node()->get_logger(),
-        "Using default robot name: '%s'", robot_name_.c_str());
+                  "Using default robot name: '%s'", robot_name_.c_str());
     } else {
       // strip leading '/'
       if (ns.front() == '/') ns.erase(0, 1);
@@ -233,16 +281,18 @@ CallbackReturn EffortExampleController::on_configure(
         robot_name_ = ns;
       }
       RCLCPP_INFO(get_node()->get_logger(),
-        "Using robot name from the namespace: '%s'", robot_name_.c_str());
+                  "Using robot name from the namespace: '%s'",
+                  robot_name_.c_str());
     }
   } else {
     RCLCPP_INFO(get_node()->get_logger(),
-      "Using robot name from param: '%s'", robot_name_.c_str());
+                "Using robot name from param: '%s'", robot_name_.c_str());
   }
 
   dq_filt_alpha_ = get_node()->get_parameter("dq_filt_alpha").as_double();
   report_period_ = get_node()->get_parameter("report_period").as_double();
   start_time_ = get_node()->get_parameter("init_time").as_double();
+  all_hw_interfaces = get_node()->get_parameter("all_hw_interfaces").as_bool();
 
   if (param_array(start_q_, "init_pos"))
     return CallbackReturn::FAILURE;
@@ -285,14 +335,22 @@ CallbackReturn EffortExampleController::on_activate(
 }
 
 void EffortExampleController::updateJointStates() {
+  int off = all_hw_interfaces ? 5 : 3;
+
   for (auto i = 0; i < lbr_fri_ros2::N_JNTS; ++i) {
-    const auto &position_interface = state_interfaces_[3 * i];
-    const auto &velocity_interface = state_interfaces_[3 * i + 1];
-    const auto &effort_interface = state_interfaces_[3 * i + 2];
+    const auto &position_interface = state_interfaces_[off * i];
+    const auto &velocity_interface = state_interfaces_[off * i + 1];
+    const auto &effort_interface = state_interfaces_[off * i + 2];
 
     q_[i] = position_interface.get_value();
     dq_[i] = velocity_interface.get_value();
     effort_[i] = effort_interface.get_value();
+    if (all_hw_interfaces) {
+      const auto &external_torque_interface = state_interfaces_[off * i + 3];
+      const auto &commanded_torque_interface = state_interfaces_[off * i + 4];
+      external_q_[i] = -external_torque_interface.get_value();
+      commanded_q_[i] = commanded_torque_interface.get_value();
+    }
   }
 }
 
